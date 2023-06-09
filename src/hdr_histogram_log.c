@@ -168,6 +168,56 @@ typedef struct /*__attribute__((__packed__))*/
 #define SIZEOF_ENCODING_FLYWEIGHT_V1 (sizeof(encoding_flyweight_v1_t) - sizeof(uint8_t))
 #define SIZEOF_COMPRESSION_FLYWEIGHT (sizeof(compression_flyweight_t) - sizeof(uint8_t))
 
+bool isBigEndian() {
+    int n = 1;
+    // little endian if true
+    if(*(char *)&n == 1) {
+        return false;
+    }
+    return true;
+}
+
+bool isLittleEndian() {
+    return  !(isBigEndian());
+}
+
+uint64_t swapEndianness(uint64_t num) {
+
+    uint64_t b0, b1, b2, b3, b4, b5, b6, b7;
+    uint64_t swapped_num;
+
+    b0 = (num & 0x00000000000000ff) << 56u;
+    b1 = (num & 0x000000000000ff00) << 40u;
+    b2 = (num & 0x0000000000ff0000) << 24u;
+    b3 = (num & 0x00000000ff000000) << 8u;
+    b4 = (num & 0x000000ff00000000) >> 8u;
+    b5 = (num & 0x0000ff0000000000) >> 24u;
+    b6 = (num & 0x00ff000000000000) >> 40u;
+    b7 = (num & 0xff00000000000000) >> 56u;
+
+    swapped_num = b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7; 
+
+    return swapped_num;
+}
+
+uint64_t htobe64_htonll(uint64_t host_num64) {
+
+    if(isLittleEndian()) {
+        // swap little endian to big endian (network byte order)
+        return swapEndianness(host_num64);
+    }
+    return host_num64;
+}
+
+uint64_t be64toh_ntohll(uint64_t network_num64) {
+
+    if(isLittleEndian()) {
+        // swap big endian (network byte order) to little endian
+        return swapEndianness(network_num64);
+    }
+    return network_num64;
+} 
+
 int hdr_encode_compressed(
     struct hdr_histogram* h,
     uint8_t** compressed_histogram,
@@ -222,9 +272,9 @@ int hdr_encode_compressed(
     encoded->payload_len              = htobe32(payload_len);
     encoded->normalizing_index_offset = htobe32(h->normalizing_index_offset);
     encoded->significant_figures      = htobe32(h->significant_figures);
-    encoded->lowest_discernible_value   = htobe64(h->lowest_discernible_value);
-    encoded->highest_trackable_value  = htobe64(h->highest_trackable_value);
-    encoded->conversion_ratio_bits    = htobe64(double_to_int64_bits(h->conversion_ratio));
+    encoded->lowest_discernible_value   = htobe64_htonll(h->lowest_discernible_value);
+    encoded->highest_trackable_value  = htobe64_htonll(h->highest_trackable_value);
+    encoded->conversion_ratio_bits    = htobe64_htonll(double_to_int64_bits(h->conversion_ratio));
 
 
     /* Estimate the size of the compressed histogram. */
@@ -257,6 +307,8 @@ int hdr_encode_compressed(
     return result;
 }
 
+
+
 /* ########  ########  ######   #######  ########  #### ##    ##  ######   */
 /* ##     ## ##       ##    ## ##     ## ##     ##  ##  ###   ## ##    ##  */
 /* ##     ## ##       ##       ##     ## ##     ##  ##  ####  ## ##        */
@@ -288,7 +340,7 @@ static void apply_to_counts_64(struct hdr_histogram* h, const int64_t* counts_da
     int i;
     for (i = 0; i < counts_limit; i++)
     {
-        h->counts[i] = be64toh(counts_data[i]);
+        h->counts[i] = be64toh_ntohll(counts_data[i]);
     }
 }
 
@@ -401,8 +453,8 @@ static int hdr_decode_compressed_v0(
     }
 
     word_size = word_size_from_cookie(be32toh(encoding_flyweight.cookie));
-    lowest_discernible_value = be64toh(encoding_flyweight.lowest_discernible_value);
-    highest_trackable_value = be64toh(encoding_flyweight.highest_trackable_value);
+    lowest_discernible_value = be64toh_ntohll(encoding_flyweight.lowest_discernible_value);
+    highest_trackable_value = be64toh_ntohll(encoding_flyweight.highest_trackable_value);
     significant_figures = be32toh(encoding_flyweight.significant_figures);
 
     if (hdr_init(
@@ -500,8 +552,8 @@ static int hdr_decode_compressed_v1(
 
     word_size = word_size_from_cookie(be32toh(encoding_flyweight.cookie));
     counts_limit = be32toh(encoding_flyweight.payload_len) / word_size;
-    lowest_discernible_value = be64toh(encoding_flyweight.lowest_discernible_value);
-    highest_trackable_value = be64toh(encoding_flyweight.highest_trackable_value);
+    lowest_discernible_value = be64toh_ntohll(encoding_flyweight.lowest_discernible_value);
+    highest_trackable_value = be64toh_ntohll(encoding_flyweight.highest_trackable_value);
     significant_figures = be32toh(encoding_flyweight.significant_figures);
 
     if (hdr_init(
@@ -532,7 +584,7 @@ static int hdr_decode_compressed_v1(
     apply_to_counts(h, word_size, counts_array, counts_limit);
 
     h->normalizing_index_offset = be32toh(encoding_flyweight.normalizing_index_offset);
-    h->conversion_ratio = int64_bits_to_double(be64toh(encoding_flyweight.conversion_ratio_bits));
+    h->conversion_ratio = int64_bits_to_double(be64toh_ntohll(encoding_flyweight.conversion_ratio_bits));
     hdr_reset_internal_counters(h);
 
 cleanup:
@@ -601,8 +653,8 @@ static int hdr_decode_compressed_v2(
     }
 
     counts_limit = be32toh(encoding_flyweight.payload_len);
-    lowest_discernible_value = be64toh(encoding_flyweight.lowest_discernible_value);
-    highest_trackable_value = be64toh(encoding_flyweight.highest_trackable_value);
+    lowest_discernible_value = be64toh_ntohll(encoding_flyweight.lowest_discernible_value);
+    highest_trackable_value = be64toh_ntohll(encoding_flyweight.highest_trackable_value);
     significant_figures = be32toh(encoding_flyweight.significant_figures);
 
     rc = hdr_init(lowest_discernible_value, highest_trackable_value, significant_figures, &h);
@@ -634,7 +686,7 @@ static int hdr_decode_compressed_v2(
     }
 
     h->normalizing_index_offset = be32toh(encoding_flyweight.normalizing_index_offset);
-    h->conversion_ratio = int64_bits_to_double(be64toh(encoding_flyweight.conversion_ratio_bits));
+    h->conversion_ratio = int64_bits_to_double(be64toh_ntohll(encoding_flyweight.conversion_ratio_bits));
     hdr_reset_internal_counters(h);
 
 cleanup:
